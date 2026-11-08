@@ -1,0 +1,50 @@
+refresh:
+  fields:
+    product:
+      required: false
+      example: "Sony WH-1000XM6"
+      selector:
+        text:
+
+add_product:
+  fields:
+    name:
+      required: true
+      example: "Sony WH-1000XM6 schwarz"
+      selector:
+        text:
+    query:
+      required: false
+      selector:
+        text:
+    target_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.05
+          mode: box
+    min_price:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.05
+          mode: box
+    urls:
+      required: false
+      selector:
+        text:
+          multiline: true
+    exclude_terms:
+      required: false
+      example: "gebraucht, refurbished, hülle"
+      selector:
+        text:
+    web_search:
+      required: false
+      default: true
+      selector:
+        boolean:

@@ -1,0 +1,25 @@
+name: Release
+
+# Create a GitHub release (e.g. tag v0.1.0) -> this builds deal_finder.zip
+# with the version from the tag and attaches it. HACS installs that zip.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build zip
+        run: python scripts/build.py --version "${{ github.event.release.tag_name }}" --repo "${{ github.repository }}"
+      - name: Attach zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/deal_finder.zip

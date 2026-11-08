@@ -1,0 +1,288 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Deal Finder",
+        "description": "General settings for your wishlist price search.",
+        "data": {
+          "country": "Country / market",
+          "currency": "Currency",
+          "scan_interval_hours": "Search interval (hours)",
+          "serpapi_key": "SerpAPI key (optional, Google Shopping without AI)"
+        },
+        "data_description": {
+          "scan_interval_hours": "How often each product is searched. AI searches cost API credits.",
+          "serpapi_key": "Optional additional source from serpapi.com."
+        }
+      },
+      "llm": {
+        "title": "AI search",
+        "description": "AI is used to search the web for prices (Gemini with Google Search, Claude with web search) and to read prices from pages without structured data. Without AI only your product URLs (and SerpAPI) are used.",
+        "data": {
+          "llm_provider": "AI provider",
+          "llm_api_key": "API key"
+        },
+        "data_description": {
+          "llm_api_key": "Gemini: aistudio.google.com/apikey · Claude: platform.claude.com"
+        }
+      },
+      "llm_model": {
+        "title": "AI model",
+        "data": {
+          "llm_model": "Model",
+          "llm_effort": "Effort (Claude)",
+          "verify_prices": "Verify AI prices on the shop page"
+        },
+        "data_description": {
+          "llm_effort": "Lower = cheaper and faster.",
+          "verify_prices": "Loads the shop pages found by the AI and reads the real price from structured data. Dead links are dropped."
+        }
+      },
+      "notify": {
+        "title": "Notifications",
+        "data": {
+          "notify_services": "Notify services",
+          "persistent_notification": "Show notification in Home Assistant",
+          "notify_on_drop": "Also notify on every price drop"
+        },
+        "data_description": {
+          "notify_services": "e.g. notify.mobile_app_my_phone"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API key",
+      "cannot_connect": "Cannot connect",
+      "unknown": "Unexpected error",
+      "api_key_required": "API key required"
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured. Add products via “Add product”."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Deal Finder",
+        "menu_options": {
+          "general": "General",
+          "llm": "AI / LLM",
+          "notify": "Notifications"
+        }
+      },
+      "general": {
+        "title": "General",
+        "data": {
+          "country": "Country / market",
+          "currency": "Currency",
+          "scan_interval_hours": "Search interval (hours)",
+          "serpapi_key": "SerpAPI key (optional, Google Shopping without AI)"
+        },
+        "data_description": {
+          "scan_interval_hours": "How often each product is searched. AI searches cost API credits.",
+          "serpapi_key": "Optional additional source from serpapi.com."
+        }
+      },
+      "llm": {
+        "title": "AI search",
+        "description": "AI is used to search the web for prices (Gemini with Google Search, Claude with web search) and to read prices from pages without structured data. Without AI only your product URLs (and SerpAPI) are used.",
+        "data": {
+          "llm_provider": "AI provider",
+          "llm_api_key": "API key"
+        },
+        "data_description": {
+          "llm_api_key": "Gemini: aistudio.google.com/apikey · Claude: platform.claude.com"
+        }
+      },
+      "llm_model": {
+        "title": "AI model",
+        "data": {
+          "llm_model": "Model",
+          "llm_effort": "Effort (Claude)",
+          "verify_prices": "Verify AI prices on the shop page"
+        },
+        "data_description": {
+          "llm_effort": "Lower = cheaper and faster.",
+          "verify_prices": "Loads the shop pages found by the AI and reads the real price from structured data. Dead links are dropped."
+        }
+      },
+      "notify": {
+        "title": "Notifications",
+        "data": {
+          "notify_services": "Notify services",
+          "persistent_notification": "Show notification in Home Assistant",
+          "notify_on_drop": "Also notify on every price drop"
+        },
+        "data_description": {
+          "notify_services": "e.g. notify.mobile_app_my_phone"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid API key",
+      "cannot_connect": "Cannot connect",
+      "unknown": "Unexpected error",
+      "api_key_required": "API key required"
+    }
+  },
+  "config_subentries": {
+    "product": {
+      "initiate_flow": {
+        "user": "Add product",
+        "reconfigure": "Edit product"
+      },
+      "entry_type": "Product",
+      "step": {
+        "user": {
+          "title": "Add product",
+          "data": {
+            "name": "Product name",
+            "query": "Search term (optional)",
+            "target_price": "Target price (notify below)",
+            "min_price": "Minimum price (filters accessories)",
+            "urls": "Product URLs (optional, one per line)",
+            "exclude_terms": "Exclude terms (comma separated)",
+            "web_search": "Search the web"
+          },
+          "data_description": {
+            "query": "Leave empty to use the product name. Be specific: model, capacity, colour.",
+            "urls": "Shop or price comparison pages (e.g. toppreise.ch, geizhals). The price is read directly from the page.",
+            "exclude_terms": "e.g. used, refurbished, case",
+            "web_search": "Uses the configured AI provider and/or SerpAPI."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit product",
+          "data": {
+            "name": "Product name",
+            "query": "Search term (optional)",
+            "target_price": "Target price (notify below)",
+            "min_price": "Minimum price (filters accessories)",
+            "urls": "Product URLs (optional, one per line)",
+            "exclude_terms": "Exclude terms (comma separated)",
+            "web_search": "Search the web"
+          },
+          "data_description": {
+            "query": "Leave empty to use the product name. Be specific: model, capacity, colour.",
+            "urls": "Shop or price comparison pages (e.g. toppreise.ch, geizhals). The price is read directly from the page.",
+            "exclude_terms": "e.g. used, refurbished, case",
+            "web_search": "Uses the configured AI provider and/or SerpAPI."
+          }
+        }
+      },
+      "error": {
+        "no_source": "No price source: enter product URLs or configure an AI provider / SerpAPI and enable web search.",
+        "invalid_url": "Please enter valid http(s) URLs.",
+        "name_required": "Please enter a product name.",
+        "invalid_number": "Invalid number."
+      },
+      "abort": {
+        "reconfigure_successful": "Product updated"
+      }
+    }
+  },
+  "selector": {
+    "llm_provider": {
+      "options": {
+        "none": "No AI",
+        "gemini": "Google Gemini",
+        "claude": "Anthropic Claude"
+      }
+    },
+    "llm_effort": {
+      "options": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "best_price": {
+        "name": "Best price"
+      },
+      "lowest_ever": {
+        "name": "All-time low"
+      },
+      "last_checked": {
+        "name": "Last checked"
+      },
+      "wishlist": {
+        "name": "Deals below target"
+      }
+    },
+    "binary_sensor": {
+      "below_target": {
+        "name": "Below target price"
+      }
+    },
+    "number": {
+      "target_price": {
+        "name": "Target price"
+      }
+    },
+    "button": {
+      "search_now": {
+        "name": "Search now"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Search prices now",
+      "description": "Searches prices immediately for all or one product.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product name; empty = all."
+        }
+      }
+    },
+    "add_product": {
+      "name": "Add product",
+      "description": "Adds a product to the wishlist.",
+      "fields": {
+        "name": {
+          "name": "Product name",
+          "description": "Product name"
+        },
+        "query": {
+          "name": "Search term (optional)",
+          "description": "Leave empty to use the product name. Be specific: model, capacity, colour."
+        },
+        "target_price": {
+          "name": "Target price (notify below)",
+          "description": "Target price (notify below)"
+        },
+        "min_price": {
+          "name": "Minimum price (filters accessories)",
+          "description": "Minimum price (filters accessories)"
+        },
+        "urls": {
+          "name": "Product URLs (optional, one per line)",
+          "description": "Shop or price comparison pages (e.g. toppreise.ch, geizhals). The price is read directly from the page."
+        },
+        "exclude_terms": {
+          "name": "Exclude terms (comma separated)",
+          "description": "e.g. used, refurbished, case"
+        },
+        "web_search": {
+          "name": "Search the web",
+          "description": "Uses the configured AI provider and/or SerpAPI."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "product_not_found": {
+      "message": "Product “{product}” not found."
+    },
+    "not_loaded": {
+      "message": "Deal Finder is not set up."
+    },
+    "invalid_product": {
+      "message": "Invalid product: {errors}"
+    }
+  }
+}

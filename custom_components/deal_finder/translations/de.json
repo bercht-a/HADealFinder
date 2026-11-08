@@ -1,0 +1,288 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Deal Finder",
+        "description": "Allgemeine Einstellungen für die Preissuche deiner Wunschliste.",
+        "data": {
+          "country": "Land / Markt",
+          "currency": "Währung",
+          "scan_interval_hours": "Suchintervall (Stunden)",
+          "serpapi_key": "SerpAPI-Key (optional, Google Shopping ohne KI)"
+        },
+        "data_description": {
+          "scan_interval_hours": "Wie oft jedes Produkt gesucht wird. KI-Suchen kosten API-Guthaben.",
+          "serpapi_key": "Optionale zusätzliche Quelle von serpapi.com."
+        }
+      },
+      "llm": {
+        "title": "KI-Suche",
+        "description": "Die KI durchsucht das Web nach Preisen (Gemini mit Google Search, Claude mit Websuche) und liest Preise von Seiten ohne strukturierte Daten. Ohne KI werden nur deine Produkt-URLs (und SerpAPI) verwendet.",
+        "data": {
+          "llm_provider": "KI-Anbieter",
+          "llm_api_key": "API-Key"
+        },
+        "data_description": {
+          "llm_api_key": "Gemini: aistudio.google.com/apikey · Claude: platform.claude.com"
+        }
+      },
+      "llm_model": {
+        "title": "KI-Modell",
+        "data": {
+          "llm_model": "Modell",
+          "llm_effort": "Aufwand (Claude)",
+          "verify_prices": "KI-Preise auf der Shopseite prüfen"
+        },
+        "data_description": {
+          "llm_effort": "Tiefer = günstiger und schneller.",
+          "verify_prices": "Lädt die von der KI gefundenen Shopseiten und liest den echten Preis aus. Tote Links werden verworfen."
+        }
+      },
+      "notify": {
+        "title": "Benachrichtigungen",
+        "data": {
+          "notify_services": "Benachrichtigungsdienste",
+          "persistent_notification": "Benachrichtigung in Home Assistant anzeigen",
+          "notify_on_drop": "Auch bei jeder Preissenkung benachrichtigen"
+        },
+        "data_description": {
+          "notify_services": "z.B. notify.mobile_app_mein_handy"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültiger API-Key",
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "unknown": "Unerwarteter Fehler",
+      "api_key_required": "API-Key erforderlich"
+    },
+    "abort": {
+      "single_instance_allowed": "Bereits eingerichtet. Produkte über „Produkt hinzufügen“ erfassen."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Deal Finder",
+        "menu_options": {
+          "general": "Allgemein",
+          "llm": "KI / LLM",
+          "notify": "Benachrichtigungen"
+        }
+      },
+      "general": {
+        "title": "Allgemein",
+        "data": {
+          "country": "Land / Markt",
+          "currency": "Währung",
+          "scan_interval_hours": "Suchintervall (Stunden)",
+          "serpapi_key": "SerpAPI-Key (optional, Google Shopping ohne KI)"
+        },
+        "data_description": {
+          "scan_interval_hours": "Wie oft jedes Produkt gesucht wird. KI-Suchen kosten API-Guthaben.",
+          "serpapi_key": "Optionale zusätzliche Quelle von serpapi.com."
+        }
+      },
+      "llm": {
+        "title": "KI-Suche",
+        "description": "Die KI durchsucht das Web nach Preisen (Gemini mit Google Search, Claude mit Websuche) und liest Preise von Seiten ohne strukturierte Daten. Ohne KI werden nur deine Produkt-URLs (und SerpAPI) verwendet.",
+        "data": {
+          "llm_provider": "KI-Anbieter",
+          "llm_api_key": "API-Key"
+        },
+        "data_description": {
+          "llm_api_key": "Gemini: aistudio.google.com/apikey · Claude: platform.claude.com"
+        }
+      },
+      "llm_model": {
+        "title": "KI-Modell",
+        "data": {
+          "llm_model": "Modell",
+          "llm_effort": "Aufwand (Claude)",
+          "verify_prices": "KI-Preise auf der Shopseite prüfen"
+        },
+        "data_description": {
+          "llm_effort": "Tiefer = günstiger und schneller.",
+          "verify_prices": "Lädt die von der KI gefundenen Shopseiten und liest den echten Preis aus. Tote Links werden verworfen."
+        }
+      },
+      "notify": {
+        "title": "Benachrichtigungen",
+        "data": {
+          "notify_services": "Benachrichtigungsdienste",
+          "persistent_notification": "Benachrichtigung in Home Assistant anzeigen",
+          "notify_on_drop": "Auch bei jeder Preissenkung benachrichtigen"
+        },
+        "data_description": {
+          "notify_services": "z.B. notify.mobile_app_mein_handy"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Ungültiger API-Key",
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "unknown": "Unerwarteter Fehler",
+      "api_key_required": "API-Key erforderlich"
+    }
+  },
+  "config_subentries": {
+    "product": {
+      "initiate_flow": {
+        "user": "Produkt hinzufügen",
+        "reconfigure": "Produkt bearbeiten"
+      },
+      "entry_type": "Produkt",
+      "step": {
+        "user": {
+          "title": "Produkt hinzufügen",
+          "data": {
+            "name": "Produktname",
+            "query": "Suchbegriff (optional)",
+            "target_price": "Zielpreis (Benachrichtigung darunter)",
+            "min_price": "Mindestpreis (filtert Zubehör)",
+            "urls": "Produkt-URLs (optional, eine pro Zeile)",
+            "exclude_terms": "Ausschlussbegriffe (kommagetrennt)",
+            "web_search": "Im Web suchen"
+          },
+          "data_description": {
+            "query": "Leer = Produktname. Möglichst genau: Modell, Speicher, Farbe.",
+            "urls": "Shop- oder Preisvergleichsseiten (z.B. toppreise.ch, geizhals). Der Preis wird direkt von der Seite gelesen.",
+            "exclude_terms": "z.B. gebraucht, refurbished, hülle",
+            "web_search": "Nutzt den konfigurierten KI-Anbieter und/oder SerpAPI."
+          }
+        },
+        "reconfigure": {
+          "title": "Produkt bearbeiten",
+          "data": {
+            "name": "Produktname",
+            "query": "Suchbegriff (optional)",
+            "target_price": "Zielpreis (Benachrichtigung darunter)",
+            "min_price": "Mindestpreis (filtert Zubehör)",
+            "urls": "Produkt-URLs (optional, eine pro Zeile)",
+            "exclude_terms": "Ausschlussbegriffe (kommagetrennt)",
+            "web_search": "Im Web suchen"
+          },
+          "data_description": {
+            "query": "Leer = Produktname. Möglichst genau: Modell, Speicher, Farbe.",
+            "urls": "Shop- oder Preisvergleichsseiten (z.B. toppreise.ch, geizhals). Der Preis wird direkt von der Seite gelesen.",
+            "exclude_terms": "z.B. gebraucht, refurbished, hülle",
+            "web_search": "Nutzt den konfigurierten KI-Anbieter und/oder SerpAPI."
+          }
+        }
+      },
+      "error": {
+        "no_source": "Keine Preisquelle: Produkt-URLs angeben oder KI-Anbieter / SerpAPI konfigurieren und Websuche aktivieren.",
+        "invalid_url": "Bitte gültige http(s)-URLs eingeben.",
+        "name_required": "Bitte einen Produktnamen eingeben.",
+        "invalid_number": "Ungültige Zahl."
+      },
+      "abort": {
+        "reconfigure_successful": "Produkt aktualisiert"
+      }
+    }
+  },
+  "selector": {
+    "llm_provider": {
+      "options": {
+        "none": "Keine KI",
+        "gemini": "Google Gemini",
+        "claude": "Anthropic Claude"
+      }
+    },
+    "llm_effort": {
+      "options": {
+        "low": "Tief",
+        "medium": "Mittel",
+        "high": "Hoch"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "best_price": {
+        "name": "Bester Preis"
+      },
+      "lowest_ever": {
+        "name": "Allzeit-Tiefstpreis"
+      },
+      "last_checked": {
+        "name": "Zuletzt geprüft"
+      },
+      "wishlist": {
+        "name": "Deals unter Zielpreis"
+      }
+    },
+    "binary_sensor": {
+      "below_target": {
+        "name": "Unter Zielpreis"
+      }
+    },
+    "number": {
+      "target_price": {
+        "name": "Zielpreis"
+      }
+    },
+    "button": {
+      "search_now": {
+        "name": "Jetzt suchen"
+      }
+    }
+  },
+  "services": {
+    "refresh": {
+      "name": "Preise jetzt suchen",
+      "description": "Sucht sofort Preise für alle oder ein Produkt.",
+      "fields": {
+        "product": {
+          "name": "Produkt",
+          "description": "Produktname; leer = alle."
+        }
+      }
+    },
+    "add_product": {
+      "name": "Produkt hinzufügen",
+      "description": "Fügt ein Produkt zur Wunschliste hinzu.",
+      "fields": {
+        "name": {
+          "name": "Produktname",
+          "description": "Produktname"
+        },
+        "query": {
+          "name": "Suchbegriff (optional)",
+          "description": "Leer = Produktname. Möglichst genau: Modell, Speicher, Farbe."
+        },
+        "target_price": {
+          "name": "Zielpreis (Benachrichtigung darunter)",
+          "description": "Zielpreis (Benachrichtigung darunter)"
+        },
+        "min_price": {
+          "name": "Mindestpreis (filtert Zubehör)",
+          "description": "Mindestpreis (filtert Zubehör)"
+        },
+        "urls": {
+          "name": "Produkt-URLs (optional, eine pro Zeile)",
+          "description": "Shop- oder Preisvergleichsseiten (z.B. toppreise.ch, geizhals). Der Preis wird direkt von der Seite gelesen."
+        },
+        "exclude_terms": {
+          "name": "Ausschlussbegriffe (kommagetrennt)",
+          "description": "z.B. gebraucht, refurbished, hülle"
+        },
+        "web_search": {
+          "name": "Im Web suchen",
+          "description": "Nutzt den konfigurierten KI-Anbieter und/oder SerpAPI."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "product_not_found": {
+      "message": "Produkt „{product}“ nicht gefunden."
+    },
+    "not_loaded": {
+      "message": "Deal Finder ist nicht eingerichtet."
+    },
+    "invalid_product": {
+      "message": "Ungültiges Produkt: {errors}"
+    }
+  }
+}
