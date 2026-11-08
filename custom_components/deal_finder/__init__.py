@@ -24,6 +24,7 @@ from .const import (
     SERVICE_ADD_PRODUCT,
     SERVICE_REFRESH,
     SUBENTRY_PRODUCT,
+    merged_config,
 )
 from .coordinator import DealFinderConfigEntry, DealFinderCoordinator
 from .panel import async_register_panel, async_remove_panel
@@ -96,22 +97,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: DealFinderConfigEntry) -> bool:
     """Set up Deal Finder from a config entry."""
     coordinator = DealFinderCoordinator(hass, entry)
-    await coordinator.async_load()
     entry.runtime_data = coordinator
+    await coordinator.async_load()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    # The panel stays registered across reloads (editing a product reloads the
-    # entry); it is only removed when the integration is deleted.
+    # The panel stays registered across reloads; it is only removed when the
+    # integration is deleted.
     await async_register_panel(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     # Search due products in the background so HA startup is not delayed.
     entry.async_create_background_task(hass, coordinator.async_refresh(), f"{DOMAIN}_initial_search")
+    # tell the panel once the entry is fully loaded
+    hass.loop.call_soon(coordinator.async_notify_ui)
     return True
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: DealFinderConfigEntry) -> None:
-    """Reload on option / product changes (cached prices are kept)."""
+    """Apply changes.
+
+    Editing a product (name, target, blocklist, ...) is applied live. Only added /
+    removed products or changed settings need a reload (cached prices are kept).
+    """
+    coordinator = entry.runtime_data
+    if merged_config(entry) == coordinator.config and set(coordinator.products) == coordinator.product_ids:
+        coordinator.async_products_changed()
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

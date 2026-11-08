@@ -15,6 +15,8 @@ für jedes Produkt, zeigt ihn als Sensor an und **benachrichtigt dich**, sobald 
 - **Unpassende Angebote ausblenden**: Mit ✕ neben einem Angebot verschwindet es sofort und taucht bei späteren Suchen
   nicht mehr auf. Erkannt wird es an der URL (ohne Tracking-Parameter) oder an Shop plus Titel. Die KI bekommt die
   abgelehnten Angebote mitgeteilt und sucht nach anderen. Unter „Ausgeblendet“ lassen sie sich wiederherstellen.
+  Per ✕ → **„Ganzer Shop“** lassen sich auch alle Angebote eines Shops für ein Produkt sperren. Erkannt wird der Shop
+  am Namen oder an der Domain, z.B. „Digitec“, „digitec.ch“ oder „Digitec Galaxus AG“.
 - Alternativ: **Einstellungen → Geräte & Dienste → Deal Finder → „Produkt hinzufügen“**
 - Pro Produkt ein Gerät mit:
   - `sensor.<produkt>_bester_preis`: aktueller Tiefstpreis (mit Shop, Link und den 10 günstigsten Angeboten als Attribute)

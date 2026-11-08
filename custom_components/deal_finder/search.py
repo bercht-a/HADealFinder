@@ -79,8 +79,10 @@ class PriceFinder:
             exclude = split_terms(product.get(CONF_EXCLUDE))
             if self.llm:
                 rejected = [
-                    " – ".join(filter(None, (b.get("display_shop"), b.get("display_title"), b.get("url"))))
-                    for b in (product.get(CONF_BLOCKED) or [])[-20:]
+                    f"ANY offer from the shop {b.get('display_shop')}" + (f" ({b['domain']})" if b.get("domain") else "")
+                    if b.get("kind") == "shop"
+                    else " – ".join(filter(None, (b.get("display_shop"), b.get("display_title"), b.get("url"))))
+                    for b in (product.get(CONF_BLOCKED) or [])[-25:]
                 ]
                 jobs.append(self._from_llm(query, exclude, rejected))
             if self.serpapi_key:

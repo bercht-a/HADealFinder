@@ -53,6 +53,12 @@ const I18N = {
     restore: "Wiederherstellen",
     restoreAll: "Alle wiederherstellen",
     restoreHint: "Wiederhergestellte Angebote erscheinen bei der nächsten Suche wieder.",
+    hideOffer: "Nur dieses Angebot",
+    hideShop: "Ganzer Shop",
+    hideShopTitle: "Alle Angebote von {shop} für dieses Produkt ausblenden",
+    shopHidden: "Shop: {shop} (alle Angebote)",
+    reconnecting: "Verbindung wird wiederhergestellt…",
+    updating: "Wird aktualisiert…",
     errors: {
       no_source: "Keine Preisquelle: Produkt-URLs angeben oder KI/SerpAPI konfigurieren und Websuche aktivieren.",
       invalid_url: "Bitte gültige http(s)-URLs eingeben.",
@@ -113,6 +119,12 @@ const I18N = {
     restore: "Restore",
     restoreAll: "Restore all",
     restoreHint: "Restored offers come back with the next search.",
+    hideOffer: "This offer only",
+    hideShop: "Whole shop",
+    hideShopTitle: "Hide all offers from {shop} for this product",
+    shopHidden: "Shop: {shop} (all offers)",
+    reconnecting: "Reconnecting…",
+    updating: "Updating…",
     errors: {
       no_source: "No price source: enter product URLs or configure AI/SerpAPI and enable web search.",
       invalid_url: "Please enter valid http(s) URLs.",
@@ -178,6 +190,11 @@ const STYLE = `
   .blocked button, details .linkbtn { padding:2px 8px; font-size:12px; }
   .hint { font-size:12px; color:var(--secondary-text-color); margin-top:6px; }
   .bestline { display:flex; align-items:baseline; gap:6px; }
+  .choice { display:inline-flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; }
+  .choice button { padding:2px 8px; font-size:12px; }
+  .status { display:none; margin-bottom:12px; padding:8px 12px; border-radius:8px; font-size:14px;
+            background:rgba(var(--rgb-info-color, 3,155,229), .15); }
+  .status.show { display:block; }
   .bestline .meta { flex:1; }
   .actions { display:flex; gap:8px; margin-top:auto; padding-top:4px; flex-wrap:wrap; }
   button { font:inherit; font-size:14px; cursor:pointer; border-radius:8px; padding:7px 14px;
@@ -220,6 +237,10 @@ class DealFinderPanel extends HTMLElement {
     this._dialog = null; // {id, values, errors, saving}
     this._unsub = null;
     this._built = false;
+    this._conn = null;
+    this._retryTimer = null;
+    this._unloadedTimer = null;
+    this._pendingBlock = null; // "productId:idx" while the hide choice is shown
   }
 
   set hass(hass) {
@@ -227,7 +248,7 @@ class DealFinderPanel extends HTMLElement {
     this._hass = hass;
     if (!this._built) this._build();
     if (this._menuButton) this._menuButton.hass = hass;
-    if (first) this._subscribe();
+    if (first || (hass.connection && hass.connection !== this._conn)) this._resubscribe();
   }
 
   set narrow(narrow) {
@@ -240,14 +261,26 @@ class DealFinderPanel extends HTMLElement {
   }
 
   connectedCallback() {
-    if (this._hass && !this._unsub) this._subscribe();
+    if (!this._visHandler) {
+      // returning to the tab / app: fetch a fresh state
+      this._visHandler = () => {
+        if (document.visibilityState === "visible" && this.isConnected) this._resubscribe();
+      };
+      document.addEventListener("visibilitychange", this._visHandler);
+    }
+    if (this._hass) this._resubscribe();
   }
 
   disconnectedCallback() {
-    if (this._unsub) {
-      this._unsub.then((unsub) => unsub()).catch(() => {});
-      this._unsub = null;
+    this._unsubscribe();
+    clearTimeout(this._retryTimer);
+    if (this._visHandler) {
+      document.removeEventListener("visibilitychange", this._visHandler);
+      this._visHandler = null;
     }
+    if (this._conn && this._readyHandler) this._conn.removeEventListener("ready", this._readyHandler);
+    this._readyHandler = null;
+    this._conn = null;
   }
 
   get t() {
@@ -263,19 +296,77 @@ class DealFinderPanel extends HTMLElement {
     return !!this._hass?.user?.is_admin;
   }
 
+  _unsubscribe() {
+    if (this._unsub) {
+      this._unsub.then((unsub) => unsub()).catch(() => {});
+      this._unsub = null;
+    }
+  }
+
+  _resubscribe() {
+    clearTimeout(this._retryTimer);
+    this._unsubscribe();
+    this._subscribe();
+  }
+
   _subscribe() {
-    if (!this._hass?.connection) return;
-    this._unsub = this._hass.connection.subscribeMessage(
-      (payload) => {
-        this._data = payload;
-        this._render();
-      },
-      { type: "deal_finder/subscribe" }
-    );
-    this._unsub.catch((err) => {
-      this._data = { loaded: false, products: [], error: err?.message };
-      this._render();
-    });
+    const conn = this._hass?.connection;
+    if (!conn || !this.isConnected || this._unsub) return;
+    if (conn !== this._conn) {
+      if (this._conn && this._readyHandler) this._conn.removeEventListener("ready", this._readyHandler);
+      this._conn = conn;
+      // after a reconnect (HA restart, network) the server-side subscription is
+      // gone and HA may not have loaded the integration yet -> subscribe anew
+      this._readyHandler = () => {
+        this._setStatus(this.t.updating);
+        clearTimeout(this._retryTimer);
+        this._retryTimer = setTimeout(() => this._resubscribe(), 1000);
+      };
+      conn.addEventListener("ready", this._readyHandler);
+    }
+    const sub = conn.subscribeMessage((payload) => this._onPayload(payload), { type: "deal_finder/subscribe" });
+    this._unsub = sub;
+    sub
+      .then(() => {
+        this._retryDelay = 0;
+      })
+      .catch(() => {
+        if (this._unsub !== sub) return;
+        this._unsub = null;
+        // e.g. "unknown_command" while HA is still starting -> retry with backoff
+        this._retryDelay = Math.min((this._retryDelay || 1000) * 2, 30000);
+        this._setStatus(this.t.reconnecting);
+        clearTimeout(this._retryTimer);
+        this._retryTimer = setTimeout(() => this._subscribe(), this._retryDelay);
+      });
+  }
+
+  _onPayload(payload) {
+    if (!payload.loaded && this._data?.loaded) {
+      // transient (reload / restart): keep showing the last data for a while
+      this._setStatus(this.t.updating);
+      if (!this._unloadedTimer) {
+        this._unloadedTimer = setTimeout(() => {
+          this._unloadedTimer = null;
+          this._data = payload;
+          this._setStatus("");
+          this._render();
+        }, 20000);
+      }
+      return;
+    }
+    clearTimeout(this._unloadedTimer);
+    this._unloadedTimer = null;
+    this._setStatus("");
+    this._data = payload;
+    this._render();
+  }
+
+  _setStatus(text) {
+    const el = this.shadowRoot.getElementById("status");
+    if (!el) return;
+    el.textContent = text || "";
+    el.classList.toggle("show", !!text);
   }
 
   _build() {
@@ -294,6 +385,7 @@ class DealFinderPanel extends HTMLElement {
           <input id="filter" type="search" placeholder="${esc(t.filter)}">
           <span class="stats" id="stats"></span>
         </div>
+        <div id="status" class="status"></div>
         <div id="content"></div>
       </main>
       <div id="dialog"></div>`;
@@ -405,10 +497,24 @@ class DealFinderPanel extends HTMLElement {
     const warn = p.last_error
       ? `<div class="warn">⚠ ${p.stale ? esc(t.stale) + "<br>" : ""}${esc(t.error)}: ${esc(this._errorText(p.last_error))}</div>`
       : "";
-    const hideBtn = (idx) =>
-      this._isAdmin
-        ? `<button class="x" data-act="block" data-id="${esc(p.id)}" data-idx="${idx}" title="${esc(t.hide)}" aria-label="${esc(t.hide)}">✕</button>`
-        : "";
+    const hideBtn = (idx) => {
+      if (!this._isAdmin) return "";
+      const offer = idx === "best" ? p.best : p.offers[idx];
+      if (this._pendingBlock === `${p.id}:${idx}` && offer) {
+        const shopName = offer.shop || "";
+        const shopBtn =
+          shopName || offer.url
+            ? `<button data-act="block-shop" data-id="${esc(p.id)}" data-idx="${idx}" title="${esc(
+                t.hideShopTitle.replace("{shop}", shopName)
+              )}">🏪 ${esc(t.hideShop)}</button>`
+            : "";
+        return `<span class="choice">
+          <button data-act="block-offer" data-id="${esc(p.id)}" data-idx="${idx}">${esc(t.hideOffer)}</button>
+          ${shopBtn}
+          <button class="x" data-act="block-cancel" title="${esc(t.cancel)}">↩</button></span>`;
+      }
+      return `<button class="x" data-act="block" data-id="${esc(p.id)}" data-idx="${idx}" title="${esc(t.hide)}" aria-label="${esc(t.hide)}">✕</button>`;
+    };
     const offers = p.offers.length
       ? `<details data-id="${esc(p.id)}" ${detailsOpen ? "open" : ""}><summary>${esc(t.offers)} (${p.offers.length})</summary>
           <ol class="offers">${p.offers
@@ -427,8 +533,12 @@ class DealFinderPanel extends HTMLElement {
             <summary>${esc(t.hidden)} (${blockedList.length})</summary>
             <ul class="blocked">${blockedList
               .map(
-                (b) => `<li><span class="txt">${b.price ? esc(this._money(b.price)) + " – " : ""}${esc(b.display_shop || b.shop || "")}${
-                  b.display_title ? " · " + esc(b.display_title) : ""
+                (b) => `<li><span class="txt">${
+                  b.kind === "shop"
+                    ? "🏪 " + esc(t.shopHidden.replace("{shop}", b.display_shop || b.domain || b.shop || ""))
+                    : (b.price ? esc(this._money(b.price)) + " – " : "") +
+                      esc(b.display_shop || b.shop || "") +
+                      (b.display_title ? " · " + esc(b.display_title) : "")
                 }</span><button data-act="unblock" data-id="${esc(p.id)}" data-block="${esc(b.id)}">${esc(t.restore)}</button></li>`
               )
               .join("")}</ul>
@@ -472,10 +582,22 @@ class DealFinderPanel extends HTMLElement {
     if (!btn) return;
     const id = btn.dataset.id;
     const product = this._data?.products.find((p) => p.id === id);
-    if (btn.dataset.act === "block" && product) {
+    const act = btn.dataset.act;
+    if (act === "block") {
+      this._pendingBlock = `${id}:${btn.dataset.idx}`;
+      this._render();
+      return;
+    }
+    if (act === "block-cancel") {
+      this._pendingBlock = null;
+      this._render();
+      return;
+    }
+    if ((act === "block-offer" || act === "block-shop") && product) {
       const idx = btn.dataset.idx;
       const offer = idx === "best" ? product.best : product.offers[Number(idx)];
-      if (offer) this._block(product, offer, btn);
+      this._pendingBlock = null;
+      if (offer) this._block(product, offer, btn, act === "block-shop" ? "shop" : "offer");
       return;
     }
     if (btn.dataset.act === "unblock" || btn.dataset.act === "unblock-all") {
@@ -495,12 +617,13 @@ class DealFinderPanel extends HTMLElement {
     }
   }
 
-  async _block(product, offer, btn) {
+  async _block(product, offer, btn, scope) {
     btn.disabled = true;
     try {
       await this._hass.callWS({
         type: "deal_finder/offer/block",
         product_id: product.id,
+        scope,
         offer: { url: offer.url || null, shop: offer.shop || null, title: offer.title || null, price: offer.price ?? null },
       });
     } catch (err) {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
@@ -76,13 +77,54 @@ def _norm(text: str | None) -> str:
     return " ".join((text or "").lower().split())
 
 
-def block_entry(offer: dict[str, Any], now: datetime) -> dict[str, Any]:
-    """Create a blocklist entry from an offer dict."""
+_SECOND_LEVEL = {"co", "com", "net", "org", "ac", "gv"}
+_SHOP_SUFFIXES = {"ag", "gmbh", "sa", "sarl", "ltd", "inc", "llc", "se", "kg", "ch", "de", "at", "shop", "online", "store"}
+
+
+def shop_key(value: str | None) -> str:
+    """Comparable shop identifier: 'Digitec', 'digitec.ch', 'https://www.digitec.ch/x' -> 'digitec'."""
+    text = (value or "").strip().lower()
+    if not text:
+        return ""
+    if "://" in text:
+        text = urlparse(text).netloc
+    if "." in text and " " not in text:  # looks like a domain
+        labels = [p for p in text.removeprefix("www.").split(".") if p]
+        if len(labels) >= 3 and labels[-2] in _SECOND_LEVEL:
+            return re.sub(r"[^a-z0-9]", "", labels[-3])
+        return re.sub(r"[^a-z0-9]", "", labels[-2] if len(labels) >= 2 else labels[0])
+    words = [w for w in re.split(r"[^a-z0-9äöüé]+", text) if w and w not in _SHOP_SUFFIXES]
+    return re.sub(r"[^a-z0-9]", "", "".join(words))
+
+
+def _shop_keys(shop: str | None, url: str | None) -> set[str]:
+    return {k for k in (shop_key(shop), shop_key(url)) if k}
+
+
+def _keys_match(a: set[str], b: list[str] | set[str]) -> bool:
+    # 'digitec' matches 'digitecgalaxus', 'mediamarkt' matches 'media markt'
+    return any(x == y or (min(len(x), len(y)) >= 4 and (x.startswith(y) or y.startswith(x))) for x in a for y in b)
+
+
+def block_entry(offer: dict[str, Any], now: datetime, kind: str = "offer") -> dict[str, Any]:
+    """Create a blocklist entry from an offer dict (kind 'offer' or 'shop')."""
     url = normalize_url(offer.get("url"))
     shop = _norm(offer.get("shop"))
     title = _norm(offer.get("title"))
+    if kind == "shop":
+        keys = sorted(_shop_keys(offer.get("shop"), offer.get("url")))
+        return {
+            "id": "shop:" + (keys[0] if keys else shop),
+            "kind": "shop",
+            "shop_keys": keys,
+            "shop": shop,
+            "display_shop": offer.get("shop") or shop_from_url(offer.get("url")),
+            "domain": shop_from_url(offer.get("url")) or None,
+            "date": now.isoformat(),
+        }
     return {
         "id": url or f"{shop}|{title}",
+        "kind": "offer",
         "url": url,
         "shop": shop,
         "title": title or None,
@@ -101,7 +143,14 @@ def is_blocked(offer: Offer | dict[str, Any], blocked: list[dict[str, Any]] | No
     url = normalize_url(get("url"))
     shop = _norm(get("shop"))
     title = _norm(get("title"))
+    keys: set[str] | None = None
     for entry in blocked:
+        if entry.get("kind") == "shop":
+            if keys is None:
+                keys = _shop_keys(get("shop"), get("url"))
+            if keys and _keys_match(keys, entry.get("shop_keys") or []):
+                return True
+            continue
         if url and entry.get("url") == url:
             return True
         # the AI may report the same offer with another URL -> also match shop + title

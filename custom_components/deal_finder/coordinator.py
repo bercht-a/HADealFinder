@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -56,6 +57,7 @@ class DealFinderCoordinator(DataUpdateCoordinator[dict[str, ProductState]]):
         self.config = merged_config(entry)
         self.finder = PriceFinder(hass, self.config)
         self.scan_interval = timedelta(hours=float(self.config.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)))
+        self.product_ids: set[str] = set(self.products)
         self.states: dict[str, ProductState] = {}
         self.searching: set[str] = set()
         self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
@@ -77,6 +79,26 @@ class DealFinderCoordinator(DataUpdateCoordinator[dict[str, ProductState]]):
         self.data = dict(self.states)
         if set(raw) - set(self.states):
             await self._async_save()  # prune removed products
+        self.async_notify_ui()
+
+    @callback
+    def async_products_changed(self) -> None:
+        """Product data changed without reload: refresh entities, device names and panel."""
+        dev_reg = dr.async_get(self.hass)
+        devices = {
+            ident[1]: device
+            for device in dr.async_entries_for_config_entry(dev_reg, self.config_entry.entry_id)
+            for ident in device.identifiers
+            if ident[0] == DOMAIN
+        }
+        for sid, sub in self.products.items():
+            state = self.states.get(sid)
+            if state is not None:
+                state.remove_blocked(sub.data.get(CONF_BLOCKED) or [])
+            device = devices.get(sid)
+            if device and device.name != sub.title:
+                dev_reg.async_update_device(device.id, name=sub.title)
+        self.async_set_updated_data(dict(self.states))
         self.async_notify_ui()
 
     @callback
@@ -138,15 +160,15 @@ class DealFinderCoordinator(DataUpdateCoordinator[dict[str, ProductState]]):
             self.searching.discard(sid)
             self.async_notify_ui()
 
-    async def async_block_offer(self, sid: str, offer: dict[str, Any]) -> None:
-        """Hide an unsuitable offer now and in all future searches."""
+    async def async_block_offer(self, sid: str, offer: dict[str, Any], kind: str = "offer") -> None:
+        """Hide an unsuitable offer (or a whole shop) now and in all future searches."""
         subentry = self.products[sid]
-        entry = block_entry(offer, dt_util.utcnow())
+        entry = block_entry(offer, dt_util.utcnow(), kind)
         blocked = [b for b in subentry.data.get(CONF_BLOCKED) or [] if b.get("id") != entry["id"]] + [entry]
         state = self.states.setdefault(sid, ProductState())
         state.remove_blocked(blocked)
         await self._async_save()
-        # updating the subentry reloads the entry; the cleaned state is loaded from the store
+        self.async_set_updated_data(dict(self.states))
         self.hass.config_entries.async_update_subentry(
             self.config_entry, subentry, data={**subentry.data, CONF_BLOCKED: blocked}
         )

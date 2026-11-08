@@ -151,3 +151,74 @@ async def test_search_result_filtered_by_current_blocklist(hass: HomeAssistant) 
     with patch(FIND, AsyncMock(return_value=[case, real])):
         await entry.runtime_data.async_search_now()
     assert [o.shop for o in entry.runtime_data.states["prod1"].offers] == ["B"]
+
+
+def test_shop_key_and_shop_block() -> None:
+    """A shop entry matches all offers of that shop, by name or domain."""
+    from custom_components.deal_finder.models import shop_key
+
+    assert shop_key("Digitec") == shop_key("digitec.ch") == shop_key("https://www.digitec.ch/de/s1/x") == "digitec"
+    assert shop_key("Amazon.co.uk") == "amazon"
+    assert shop_key("Media Markt AG") == "mediamarkt"
+
+    blocked = [block_entry({"url": "https://www.digitec.ch/p/1", "shop": "Digitec"}, NOW, "shop")]
+    assert blocked[0]["id"] == "shop:digitec"
+    assert is_blocked(Offer(price=1, currency="CHF", shop="Digitec Galaxus AG"), blocked)
+    assert is_blocked(Offer(price=1, currency="CHF", shop="?", url="https://digitec.ch/other"), blocked)
+    assert not is_blocked(Offer(price=1, currency="CHF", shop="Galaxus", url="https://www.galaxus.ch/p/1"), blocked)
+    assert not is_blocked(Offer(price=1, currency="CHF", shop="Brack", url="https://www.brack.ch/p"), blocked)
+
+
+async def test_block_shop_and_live_edit_without_reload(hass: HomeAssistant, hass_ws_client) -> None:
+    """Blocking a shop and editing a product apply live (no reload, same coordinator)."""
+    a1 = Offer(price=199.0, currency="CHF", shop="Digitec", url="https://www.digitec.ch/p/1", title="XM6 B-Ware")
+    a2 = Offer(price=205.0, currency="CHF", shop="digitec.ch", url="https://www.digitec.ch/p/2")
+    b = Offer(price=279.0, currency="CHF", shop="Brack", url="https://www.brack.ch/xm6")
+    entry = await _setup(hass, [a1, a2, b])
+    coordinator = entry.runtime_data
+    client = await hass_ws_client(hass)
+
+    res = await _ws(
+        client,
+        {"type": "deal_finder/offer/block", "product_id": "prod1", "scope": "shop", "offer": a1.as_dict()},
+    )
+    assert res["success"], res
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data is coordinator  # no reload
+    assert [o.shop for o in coordinator.states["prod1"].offers] == ["Brack"]
+    [entry_block] = entry.subentries["prod1"].data[CONF_BLOCKED]
+    assert entry_block["kind"] == "shop"
+
+    # later searches keep the shop out
+    with patch(FIND, AsyncMock(side_effect=lambda product: coordinator.finder._filter([a1, a2, b], product))):
+        await coordinator.async_search_now()
+    assert [o.shop for o in coordinator.states["prod1"].offers] == ["Brack"]
+
+    # renaming applies live, incl. device name
+    res = await _ws(
+        client,
+        {"type": "deal_finder/product/save", "product_id": "prod1", "data": {"name": "XM6 neu", "urls": "https://shop.example/p"}},
+    )
+    assert res["result"]["success"]
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data is coordinator
+    from homeassistant.helpers import device_registry as dr
+
+    reg = dr.async_get(hass)
+    [device] = [d for d in dr.async_entries_for_config_entry(reg, entry.entry_id) if (DOMAIN, "prod1") in d.identifiers]
+    assert device.name == "XM6 neu"
+
+
+async def test_panel_payload_during_setup(hass: HomeAssistant) -> None:
+    """While the entry is still setting up, the panel already gets real data."""
+    from custom_components.deal_finder.websocket import build_payload
+
+    payloads = []
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.deal_finder.const import SIGNAL_UPDATED
+
+    async_dispatcher_connect(hass, SIGNAL_UPDATED, lambda: payloads.append(build_payload(hass)))
+    await _setup(hass, [Offer(price=279.0, currency="CHF", shop="B")])
+    assert payloads
+    assert all(p["loaded"] for p in payloads)

@@ -30,8 +30,13 @@ from .product import PRODUCT_FIELDS, has_web_search, normalize_product
 
 
 def _entry(hass: HomeAssistant) -> DealFinderConfigEntry | None:
+    # SETUP_IN_PROGRESS counts too: the coordinator notifies the panel while
+    # the entry is still being set up (otherwise the panel would show
+    # "not loaded" after every reload).
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.state is ConfigEntryState.LOADED:
+        if entry.state in (ConfigEntryState.LOADED, ConfigEntryState.SETUP_IN_PROGRESS) and isinstance(
+            getattr(entry, "runtime_data", None), DealFinderCoordinator
+        ):
             return entry
     return None
 
@@ -199,6 +204,7 @@ def _coordinator_for(
             },
             extra=vol.REMOVE_EXTRA,
         ),
+        vol.Optional("scope", default="offer"): vol.In(["offer", "shop"]),
     }
 )
 @websocket_api.require_admin
@@ -211,7 +217,10 @@ async def ws_block_offer(hass: HomeAssistant, connection: websocket_api.ActiveCo
     if not (offer.get("url") or offer.get("shop") or offer.get("title")):
         connection.send_error(msg["id"], "invalid_offer", "Offer needs url, shop or title")
         return
-    await coordinator.async_block_offer(msg["product_id"], offer)
+    if msg["scope"] == "shop" and not (offer.get("shop") or offer.get("url")):
+        connection.send_error(msg["id"], "invalid_offer", "Offer needs shop or url")
+        return
+    await coordinator.async_block_offer(msg["product_id"], offer, msg["scope"])
     connection.send_result(msg["id"], {"success": True})
 
 
