@@ -12,6 +12,9 @@ für jedes Produkt, zeigt ihn als Sensor an und **benachrichtigt dich**, sobald 
   Abstand zum Zielpreis, Allzeit-Tief und den günstigsten Angeboten. Produkte lassen sich dort hinzufügen, bearbeiten,
   löschen und sofort suchen. Die Seite aktualisiert sich live, auch während einer laufenden Suche.
   Bearbeiten dürfen nur Admins, alle anderen sehen die Liste.
+- **Unpassende Angebote ausblenden**: Mit ✕ neben einem Angebot verschwindet es sofort und taucht bei späteren Suchen
+  nicht mehr auf. Erkannt wird es an der URL (ohne Tracking-Parameter) oder an Shop plus Titel. Die KI bekommt die
+  abgelehnten Angebote mitgeteilt und sucht nach anderen. Unter „Ausgeblendet“ lassen sie sich wiederherstellen.
 - Alternativ: **Einstellungen → Geräte & Dienste → Deal Finder → „Produkt hinzufügen“**
 - Pro Produkt ein Gerät mit:
   - `sensor.<produkt>_bester_preis`: aktueller Tiefstpreis (mit Shop, Link und den 10 günstigsten Angeboten als Attribute)

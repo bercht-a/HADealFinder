@@ -48,6 +48,11 @@ const I18N = {
     deals: "unter Zielpreis",
     source: "Quelle",
     every: "Suche alle {h} h",
+    hide: "Unpassend – ausblenden",
+    hidden: "Ausgeblendet",
+    restore: "Wiederherstellen",
+    restoreAll: "Alle wiederherstellen",
+    restoreHint: "Wiederhergestellte Angebote erscheinen bei der nächsten Suche wieder.",
     errors: {
       no_source: "Keine Preisquelle: Produkt-URLs angeben oder KI/SerpAPI konfigurieren und Websuche aktivieren.",
       invalid_url: "Bitte gültige http(s)-URLs eingeben.",
@@ -103,6 +108,11 @@ const I18N = {
     deals: "below target",
     source: "Source",
     every: "Search every {h} h",
+    hide: "Not matching – hide",
+    hidden: "Hidden",
+    restore: "Restore",
+    restoreAll: "Restore all",
+    restoreHint: "Restored offers come back with the next search.",
     errors: {
       no_source: "No price source: enter product URLs or configure AI/SerpAPI and enable web search.",
       invalid_url: "Please enter valid http(s) URLs.",
@@ -159,6 +169,16 @@ const STYLE = `
   .offers { margin:8px 0 0; padding-left:20px; }
   .offers li { margin:3px 0; }
   .offers .p { font-weight:500; }
+  .offers li, .blocked li { display:flex; align-items:baseline; gap:6px; }
+  .offers li .txt, .blocked li .txt { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .x { border:none; padding:0 4px; font-size:15px; line-height:1; color:var(--secondary-text-color); background:none; border-radius:4px; }
+  .x:hover { color:var(--error-color, #db4437); background:rgba(127,127,127,.15); }
+  .blocked { margin:8px 0 0; padding-left:0; list-style:none; color:var(--secondary-text-color); }
+  .blocked li { margin:4px 0; }
+  .blocked button, details .linkbtn { padding:2px 8px; font-size:12px; }
+  .hint { font-size:12px; color:var(--secondary-text-color); margin-top:6px; }
+  .bestline { display:flex; align-items:baseline; gap:6px; }
+  .bestline .meta { flex:1; }
   .actions { display:flex; gap:8px; margin-top:auto; padding-top:4px; flex-wrap:wrap; }
   button { font:inherit; font-size:14px; cursor:pointer; border-radius:8px; padding:7px 14px;
            border:1px solid var(--divider-color, #ccc); background:transparent; color:var(--primary-text-color); }
@@ -361,10 +381,11 @@ class DealFinderPanel extends HTMLElement {
     }
     // keep open <details> across re-renders
     const open = new Set([...content.querySelectorAll("details[open]")].map((d) => d.dataset.id));
-    content.innerHTML = `<div class="grid">${visible.map((p) => this._card(p, open.has(p.id))).join("")}</div>`;
+    content.innerHTML = `<div class="grid">${visible.map((p) => this._card(p, open)).join("")}</div>`;
   }
 
-  _card(p, detailsOpen) {
+  _card(p, openSet) {
+    const detailsOpen = openSet.has(p.id);
     const t = this.t;
     const best = p.best;
     const target = p.data.target_price;
@@ -384,16 +405,37 @@ class DealFinderPanel extends HTMLElement {
     const warn = p.last_error
       ? `<div class="warn">⚠ ${p.stale ? esc(t.stale) + "<br>" : ""}${esc(t.error)}: ${esc(this._errorText(p.last_error))}</div>`
       : "";
+    const hideBtn = (idx) =>
+      this._isAdmin
+        ? `<button class="x" data-act="block" data-id="${esc(p.id)}" data-idx="${idx}" title="${esc(t.hide)}" aria-label="${esc(t.hide)}">✕</button>`
+        : "";
     const offers = p.offers.length
       ? `<details data-id="${esc(p.id)}" ${detailsOpen ? "open" : ""}><summary>${esc(t.offers)} (${p.offers.length})</summary>
           <ol class="offers">${p.offers
-            .map((o) => {
+            .map((o, i) => {
               const ou = safeUrl(o.url);
               const shop = ou ? `<a href="${esc(ou)}" target="_blank" rel="noopener noreferrer">${esc(o.shop)}</a>` : esc(o.shop);
-              return `<li><span class="p">${esc(this._money(o.price))}</span> – ${shop}${o.verified ? ` <span class="ok" title="${esc(t.verified)}">✓</span>` : ""}</li>`;
+              const title = o.title ? ` <span class="meta">${esc(o.title)}</span>` : "";
+              return `<li><span class="txt"><span class="p">${esc(this._money(o.price))}</span> – ${shop}${o.verified ? ` <span class="ok" title="${esc(t.verified)}">✓</span>` : ""}${title}</span>${hideBtn(i)}</li>`;
             })
             .join("")}</ol></details>`
       : "";
+    const blockedList = p.blocked || [];
+    const blocked =
+      blockedList.length && this._isAdmin
+        ? `<details data-id="${esc(p.id)}-blocked" ${openSet.has(p.id + "-blocked") ? "open" : ""}>
+            <summary>${esc(t.hidden)} (${blockedList.length})</summary>
+            <ul class="blocked">${blockedList
+              .map(
+                (b) => `<li><span class="txt">${b.price ? esc(this._money(b.price)) + " – " : ""}${esc(b.display_shop || b.shop || "")}${
+                  b.display_title ? " · " + esc(b.display_title) : ""
+                }</span><button data-act="unblock" data-id="${esc(p.id)}" data-block="${esc(b.id)}">${esc(t.restore)}</button></li>`
+              )
+              .join("")}</ul>
+            ${blockedList.length > 1 ? `<button class="linkbtn" data-act="unblock-all" data-id="${esc(p.id)}">${esc(t.restoreAll)}</button>` : ""}
+            <div class="hint">${esc(t.restoreHint)}</div>
+          </details>`
+        : "";
     const admin = this._isAdmin
       ? `<button data-act="edit" data-id="${esc(p.id)}">✎ ${esc(t.edit)}</button>
          <button data-act="delete" data-id="${esc(p.id)}" class="danger">🗑 ${esc(t.del)}</button>`
@@ -404,9 +446,9 @@ class DealFinderPanel extends HTMLElement {
         ${
           best
             ? `<div class="price">${esc(this._money(best.price))}</div>
-               <div class="meta">${esc(t.at)} ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(best.shop)}</a>` : esc(best.shop)}
+               <div class="bestline"><div class="meta">${esc(t.at)} ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(best.shop)}</a>` : esc(best.shop)}
                  · <span class="${best.verified ? "ok" : ""}">${best.verified ? "✓ " + esc(t.verified) : esc(t.unverified)}</span>
-                 · ${esc(t.source)}: ${esc(best.source)}</div>`
+                 · ${esc(t.source)}: ${esc(best.source)}</div>${hideBtn("best")}</div>`
             : `<div class="price none">${esc(t.noPrice)}</div>`
         }
         ${diff}
@@ -417,6 +459,7 @@ class DealFinderPanel extends HTMLElement {
         </div>
         ${warn}
         ${offers}
+        ${blocked}
         <div class="actions">
           <button data-act="search" data-id="${esc(p.id)}" ${p.searching ? "disabled" : ""}>⟳ ${esc(t.search)}</button>
           ${admin}
@@ -429,6 +472,16 @@ class DealFinderPanel extends HTMLElement {
     if (!btn) return;
     const id = btn.dataset.id;
     const product = this._data?.products.find((p) => p.id === id);
+    if (btn.dataset.act === "block" && product) {
+      const idx = btn.dataset.idx;
+      const offer = idx === "best" ? product.best : product.offers[Number(idx)];
+      if (offer) this._block(product, offer, btn);
+      return;
+    }
+    if (btn.dataset.act === "unblock" || btn.dataset.act === "unblock-all") {
+      this._unblock(id, btn.dataset.act === "unblock" ? btn.dataset.block : null, btn);
+      return;
+    }
     if (btn.dataset.act === "search") this._search(id);
     else if (btn.dataset.act === "edit" && product) this._openDialog(product);
     else if (btn.dataset.act === "delete" && product) this._delete(product);
@@ -438,6 +491,32 @@ class DealFinderPanel extends HTMLElement {
     try {
       await this._hass.callWS(productId ? { type: "deal_finder/search", product_id: productId } : { type: "deal_finder/search" });
     } catch (err) {
+      alert(err?.message || err);
+    }
+  }
+
+  async _block(product, offer, btn) {
+    btn.disabled = true;
+    try {
+      await this._hass.callWS({
+        type: "deal_finder/offer/block",
+        product_id: product.id,
+        offer: { url: offer.url || null, shop: offer.shop || null, title: offer.title || null, price: offer.price ?? null },
+      });
+    } catch (err) {
+      btn.disabled = false;
+      alert(err?.message || err);
+    }
+  }
+
+  async _unblock(productId, blockId, btn) {
+    btn.disabled = true;
+    const msg = { type: "deal_finder/offer/unblock", product_id: productId };
+    if (blockId) msg.block_id = blockId;
+    try {
+      await this._hass.callWS(msg);
+    } catch (err) {
+      btn.disabled = false;
       alert(err?.message || err);
     }
   }

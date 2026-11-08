@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import (
+    CONF_BLOCKED,
     CONF_COUNTRY,
     CONF_LLM_MODEL,
     CONF_LLM_PROVIDER,
@@ -52,6 +53,7 @@ def _product_payload(coordinator: DealFinderCoordinator, sid: str, sub: ConfigSu
         "last_error": state.last_error if state else None,
         "stale": state.stale if state else False,
         "searching": sid in coordinator.searching,
+        "blocked": list(sub.data.get(CONF_BLOCKED) or []),
     }
 
 
@@ -82,6 +84,8 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_product)
     websocket_api.async_register_command(hass, ws_delete_product)
     websocket_api.async_register_command(hass, ws_search)
+    websocket_api.async_register_command(hass, ws_block_offer)
+    websocket_api.async_register_command(hass, ws_unblock_offer)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "deal_finder/subscribe"})
@@ -123,6 +127,8 @@ def ws_save_product(hass: HomeAssistant, connection: websocket_api.ActiveConnect
         if subentry is None or subentry.subentry_type != SUBENTRY_PRODUCT:
             connection.send_error(msg["id"], "not_found", "Product not found")
             return
+        if subentry.data.get(CONF_BLOCKED):
+            data[CONF_BLOCKED] = subentry.data[CONF_BLOCKED]
         hass.config_entries.async_update_subentry(entry, subentry, title=data[CONF_PRODUCT_NAME], data=data)
     else:
         subentry = ConfigSubentry(
@@ -167,4 +173,60 @@ def ws_search(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
         connection.send_error(msg["id"], "not_found", "Product not found")
         return
     entry.async_create_background_task(hass, coordinator.async_search_now(sids), f"{DOMAIN}_ws_search")
+    connection.send_result(msg["id"], {"success": True})
+
+
+def _coordinator_for(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> DealFinderCoordinator | None:
+    entry = _entry(hass)
+    if entry is None or msg["product_id"] not in entry.runtime_data.products:
+        connection.send_error(msg["id"], "not_found", "Product not found")
+        return None
+    return entry.runtime_data
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "deal_finder/offer/block",
+        vol.Required("product_id"): str,
+        vol.Required("offer"): vol.Schema(
+            {
+                vol.Optional("url"): vol.Any(str, None),
+                vol.Optional("shop"): vol.Any(str, None),
+                vol.Optional("title"): vol.Any(str, None),
+                vol.Optional("price"): vol.Any(float, int, None),
+            },
+            extra=vol.REMOVE_EXTRA,
+        ),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_block_offer(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Hide an unsuitable offer permanently."""
+    if (coordinator := _coordinator_for(hass, connection, msg)) is None:
+        return
+    offer = msg["offer"]
+    if not (offer.get("url") or offer.get("shop") or offer.get("title")):
+        connection.send_error(msg["id"], "invalid_offer", "Offer needs url, shop or title")
+        return
+    await coordinator.async_block_offer(msg["product_id"], offer)
+    connection.send_result(msg["id"], {"success": True})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "deal_finder/offer/unblock",
+        vol.Required("product_id"): str,
+        vol.Optional("block_id"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_unblock_offer(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Allow a blocked offer again (without block_id: all)."""
+    if (coordinator := _coordinator_for(hass, connection, msg)) is None:
+        return
+    coordinator.async_unblock_offer(msg["product_id"], msg.get("block_id"))
     connection.send_result(msg["id"], {"success": True})

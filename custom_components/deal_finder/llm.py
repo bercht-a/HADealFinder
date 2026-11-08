@@ -60,7 +60,9 @@ OUTPUT_SPEC = (
 )
 
 
-def build_search_prompt(query: str, country: str, currency: str, exclude: list[str]) -> str:
+def build_search_prompt(
+    query: str, country: str, currency: str, exclude: list[str], rejected: list[str] | None = None
+) -> str:
     """Build the user prompt for a web price search."""
     name, _, sites = COUNTRIES.get(country, (country, currency, []))
     parts = [
@@ -76,6 +78,11 @@ def build_search_prompt(query: str, country: str, currency: str, exclude: list[s
     )
     if exclude:
         parts.append(f"Exclude offers whose title contains any of: {', '.join(exclude)}.")
+    if rejected:
+        parts.append(
+            "The user rejected these offers as not matching - do not return them again "
+            "and look for other offers instead:\n- " + "\n- ".join(rejected)
+        )
     parts.append(OUTPUT_SPEC)
     return "\n".join(parts)
 
@@ -155,11 +162,11 @@ class LLMClient(ABC):
         """Run a prompt and return the answer text."""
 
     async def async_search_offers(
-        self, query: str, country: str, currency: str, exclude: list[str]
+        self, query: str, country: str, currency: str, exclude: list[str], rejected: list[str] | None = None
     ) -> list[Offer]:
         """Search the web for offers."""
         text = await self._async_generate(
-            build_search_prompt(query, country, currency, exclude), web_search=True, country=country
+            build_search_prompt(query, country, currency, exclude, rejected), web_search=True, country=country
         )
         return offers_from_json(parse_json_block(text), currency, self.name)
 

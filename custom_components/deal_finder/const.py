@@ -55,6 +55,7 @@ CONF_TARGET_PRICE = "target_price"
 CONF_MIN_PRICE = "min_price"
 CONF_EXCLUDE = "exclude_terms"
 CONF_WEB_SEARCH = "web_search"
+CONF_BLOCKED = "blocked_offers"  # managed via the panel, not part of the forms
 
 DEFAULT_SCAN_INTERVAL = 12  # hours
 COORDINATOR_TICK_MINUTES = 15

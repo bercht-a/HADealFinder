@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_BLOCKED,
     CONF_NOTIFY_ON_DROP,
     CONF_NOTIFY_SERVICES,
     CONF_PERSISTENT_NOTIFICATION,
@@ -30,7 +31,7 @@ from .const import (
     SUBENTRY_PRODUCT,
     merged_config,
 )
-from .models import Offer, ProductState
+from .models import Offer, ProductState, block_entry, is_blocked
 from .search import PriceFinder
 
 STORAGE_VERSION = 1
@@ -127,11 +128,37 @@ class DealFinderCoordinator(DataUpdateCoordinator[dict[str, ProductState]]):
                     LOGGER.warning("Price search for '%s' failed: %s", subentry.title, err)
                     state.apply_error(str(err), dt_util.utcnow())
                     return
-            state.apply_offers(offers, dt_util.utcnow())
-            await self._async_check_alerts(subentry, state)
+            # re-read the blocklist: the user may have blocked something meanwhile
+            current = self.config_entry.subentries.get(sid, subentry)
+            blocked = current.data.get(CONF_BLOCKED) or []
+            state.remove_blocked(blocked)
+            state.apply_offers([o for o in offers if not is_blocked(o, blocked)], dt_util.utcnow())
+            await self._async_check_alerts(current, state)
         finally:
             self.searching.discard(sid)
             self.async_notify_ui()
+
+    async def async_block_offer(self, sid: str, offer: dict[str, Any]) -> None:
+        """Hide an unsuitable offer now and in all future searches."""
+        subentry = self.products[sid]
+        entry = block_entry(offer, dt_util.utcnow())
+        blocked = [b for b in subentry.data.get(CONF_BLOCKED) or [] if b.get("id") != entry["id"]] + [entry]
+        state = self.states.setdefault(sid, ProductState())
+        state.remove_blocked(blocked)
+        await self._async_save()
+        # updating the subentry reloads the entry; the cleaned state is loaded from the store
+        self.hass.config_entries.async_update_subentry(
+            self.config_entry, subentry, data={**subentry.data, CONF_BLOCKED: blocked}
+        )
+
+    def async_unblock_offer(self, sid: str, block_id: str | None) -> None:
+        """Allow a blocked offer again (or all, if block_id is None); it returns with the next search."""
+        subentry = self.products[sid]
+        blocked = [b for b in subentry.data.get(CONF_BLOCKED) or [] if block_id is not None and b.get("id") != block_id]
+        data = {**subentry.data, CONF_BLOCKED: blocked}
+        if not blocked:
+            data.pop(CONF_BLOCKED)
+        self.hass.config_entries.async_update_subentry(self.config_entry, subentry, data=data)
 
     async def _async_check_alerts(self, subentry: ConfigSubentry, state: ProductState) -> None:
         best = state.best

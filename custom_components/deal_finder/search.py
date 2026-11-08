@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    CONF_BLOCKED,
     CONF_COUNTRY,
     CONF_CURRENCY,
     CONF_EXCLUDE,
@@ -26,7 +27,7 @@ from .const import (
 )
 from .extract import PageFetchError, fetch_page, parse_page, parse_price
 from .llm import LLMClient, llm_from_config
-from .models import Offer, shop_from_url
+from .models import Offer, is_blocked, normalize_url, shop_from_url
 
 MAX_VERIFY = 5
 
@@ -77,7 +78,11 @@ class PriceFinder:
         if product.get(CONF_WEB_SEARCH, True):
             exclude = split_terms(product.get(CONF_EXCLUDE))
             if self.llm:
-                jobs.append(self._from_llm(query, exclude))
+                rejected = [
+                    " – ".join(filter(None, (b.get("display_shop"), b.get("display_title"), b.get("url"))))
+                    for b in (product.get(CONF_BLOCKED) or [])[-20:]
+                ]
+                jobs.append(self._from_llm(query, exclude, rejected))
             if self.serpapi_key:
                 jobs.append(self._from_serpapi(query))
         if not jobs:
@@ -101,9 +106,13 @@ class PriceFinder:
     def _filter(self, offers: list[Offer], product: dict[str, Any]) -> list[Offer]:
         min_price = product.get(CONF_MIN_PRICE)
         exclude = split_terms(product.get(CONF_EXCLUDE))
+        blocked = product.get(CONF_BLOCKED) or []
         best_by_key: dict[str, Offer] = {}
         for offer in offers:
             if offer.price <= 0:
+                continue
+            if is_blocked(offer, blocked):
+                LOGGER.debug("Skip offer blocked by user: %s", offer)
                 continue
             if offer.currency and offer.currency.upper() != self.currency:
                 LOGGER.debug("Skip offer in foreign currency: %s", offer)
@@ -116,7 +125,7 @@ class PriceFinder:
                 continue
             if offer.availability and "out" in offer.availability.lower():
                 continue
-            key = (offer.url or f"{offer.shop}|{offer.price}").split("?")[0].rstrip("/").lower()
+            key = normalize_url(offer.url) or f"{offer.shop}|{offer.price}".lower()
             if key not in best_by_key or offer.price < best_by_key[key].price:
                 best_by_key[key] = offer
         return sorted(best_by_key.values(), key=lambda o: (o.price, not o.verified))
@@ -147,9 +156,9 @@ class PriceFinder:
                 return [offer]
         raise SearchError(f"no price found on {shop_from_url(url)}")
 
-    async def _from_llm(self, query: str, exclude: list[str]) -> list[Offer]:
+    async def _from_llm(self, query: str, exclude: list[str], rejected: list[str]) -> list[Offer]:
         assert self.llm is not None
-        offers = await self.llm.async_search_offers(query, self.country, self.currency, exclude)
+        offers = await self.llm.async_search_offers(query, self.country, self.currency, exclude, rejected)
         LOGGER.debug("LLM offers for %s: %s", query, offers)
         if self.verify and offers:
             offers = await self._verify(offers)

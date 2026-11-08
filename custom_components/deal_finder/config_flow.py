@@ -30,6 +30,7 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CLAUDE_EFFORTS,
+    CONF_BLOCKED,
     CONF_COUNTRY,
     CONF_CURRENCY,
     CONF_EXCLUDE,
@@ -306,6 +307,8 @@ class ProductSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             data, errors = self._validate(user_input)
             if not errors:
+                if subentry.data.get(CONF_BLOCKED):  # blocklist is managed in the panel
+                    data[CONF_BLOCKED] = subentry.data[CONF_BLOCKED]
                 return self.async_update_and_abort(
                     self._get_entry(), subentry, title=data[CONF_PRODUCT_NAME], data=data
                 )
