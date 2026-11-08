@@ -1,25 +1,29 @@
 name: Release
 
-# Create a GitHub release (e.g. tag v0.1.0) -> this builds deal_finder.zip
-# with the version from the tag and attaches it. HACS installs that zip.
+# Push a tag like v0.1.1 -> this builds deal_finder.zip with that version,
+# creates a draft release, attaches the zip and then publishes it.
+# (Draft first, because immutable releases don't accept assets after publishing.)
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
       - name: Build zip
-        run: python scripts/build.py --version "${{ github.event.release.tag_name }}" --repo "${{ github.repository }}"
-      - name: Attach zip to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/deal_finder.zip
+        run: python scripts/build.py --version "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}"
+      - name: Create release with zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/deal_finder.zip \
+            --draft --title "Deal Finder ${GITHUB_REF_NAME}" --generate-notes --verify-tag
+          gh release edit "${GITHUB_REF_NAME}" --draft=false --latest

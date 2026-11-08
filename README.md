@@ -60,9 +60,13 @@ der echte Preis wird ausgelesen und tote Links (404) werden verworfen.
 
 ### Neue Version veröffentlichen
 
-1. Auf GitHub ein Release mit Tag `vX.Y.Z` erstellen
-2. Der Workflow `Release` baut `deal_finder.zip` mit dieser Version und hängt es an das Release an
-3. HACS zeigt das Update an
+```bash
+git tag v0.1.2 && git push origin v0.1.2
+```
+
+Der Workflow `Release` baut `deal_finder.zip` mit dieser Version, erstellt das GitHub-Release, hängt das Paket an und
+veröffentlicht es. HACS zeigt das Update danach an. Releases bitte **nicht** von Hand auf GitHub anlegen: Mit
+„immutable releases“ lässt sich an ein veröffentlichtes Release kein Paket mehr anhängen.
 
 ## Einrichtung
 
