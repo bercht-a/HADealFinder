@@ -2,7 +2,7 @@
   "domain": "deal_finder",
   "name": "Deal Finder",
   "codeowners": [
-    "@YOUR_GITHUB_USER"
+    "@bercht-a"
   ],
   "config_flow": true,
   "dependencies": [
@@ -11,10 +11,10 @@
     "panel_custom",
     "websocket_api"
   ],
-  "documentation": "https://github.com/YOUR_GITHUB_USER/HADealFinder",
+  "documentation": "https://github.com/bercht-a/HADealFinder",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/YOUR_GITHUB_USER/HADealFinder/issues",
+  "issue_tracker": "https://github.com/bercht-a/HADealFinder/issues",
   "requirements": [
     "anthropic>=0.40.0"
   ],

@@ -1,7 +1,7 @@
 # Deal Finder für Home Assistant
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz/)
-[![Validate](https://github.com/YOUR_GITHUB_USER/HADealFinder/actions/workflows/validate.yml/badge.svg)](https://github.com/YOUR_GITHUB_USER/HADealFinder/actions/workflows/validate.yml)
+[![Validate](https://github.com/bercht-a/HADealFinder/actions/workflows/validate.yml/badge.svg)](https://github.com/bercht-a/HADealFinder/actions/workflows/validate.yml)
 
 Pflege eine **Wunschliste** in Home Assistant. Deal Finder sucht regelmässig im Web den **tiefsten Preis**
 für jedes Produkt, zeigt ihn als Sensor an und **benachrichtigt dich**, sobald dein Zielpreis unterschritten wird.
@@ -46,14 +46,14 @@ der echte Preis wird ausgelesen und tote Links (404) werden verworfen.
 
 ## Installation über HACS
 
-1. HACS → ⋮ → **Benutzerdefinierte Repositories** → URL `https://github.com/YOUR_GITHUB_USER/HADealFinder`, Typ **Integration**
+1. HACS → ⋮ → **Benutzerdefinierte Repositories** → URL `https://github.com/bercht-a/HADealFinder`, Typ **Integration**
 2. „Deal Finder“ suchen → **Herunterladen**
 3. Home Assistant neu starten
 4. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Deal Finder**
 
 ### Manuell (ohne HACS)
 
-1. `deal_finder.zip` aus dem neuesten [Release](https://github.com/YOUR_GITHUB_USER/HADealFinder/releases) herunterladen
+1. `deal_finder.zip` aus dem neuesten [Release](https://github.com/bercht-a/HADealFinder/releases) herunterladen
    (oder lokal bauen: `python scripts/build.py`, ergibt `dist/deal_finder.zip`)
 2. Inhalt nach `<config>/custom_components/deal_finder/` entpacken (z.B. per Samba-Share oder File-Editor-Add-on)
 3. Home Assistant neu starten

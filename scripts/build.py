@@ -12,19 +12,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "custom_components" / "deal_finder"
 DIST = ROOT / "dist"
-PLACEHOLDER = "YOUR_GITHUB_USER/HADealFinder"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", help="version to write into manifest.json (e.g. 0.1.0 or v0.1.0)")
-    parser.add_argument("--repo", help="GitHub repo 'user/name' replacing the placeholder in manifest.json")
+    parser.add_argument("--repo", help="GitHub repo 'user/name' for the URLs in manifest.json (default: as committed)")
     args = parser.parse_args()
 
     manifest = json.loads((SRC / "manifest.json").read_text(encoding="utf-8"))
@@ -33,7 +33,7 @@ def main() -> None:
     if args.repo:
         user = args.repo.split("/")[0]
         for key in ("documentation", "issue_tracker"):
-            manifest[key] = manifest[key].replace(PLACEHOLDER, args.repo)
+            manifest[key] = re.sub(r"github\.com/[^/]+/[^/]+", f"github.com/{args.repo}", manifest[key])
         manifest["codeowners"] = [f"@{user}"]
 
     DIST.mkdir(exist_ok=True)
