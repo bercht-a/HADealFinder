@@ -46,6 +46,15 @@ anhand seines Namens in beliebigen Shops. Seiten ohne strukturierte Daten kann s
 Gegen erfundene Angebote hilft die Option **„KI-Preise auf der Shopseite prüfen“**: Die gefundenen Links werden geladen,
 der echte Preis wird ausgelesen und tote Links (404) werden verworfen.
 
+**Schutz vor erfundenen Links:** Jeder Link eines KI-Angebots wird mit den Quellen verglichen, die die KI bei ihrer
+Websuche tatsächlich gesehen hat. Links, die dort nicht vorkommen, bleiben nur, wenn Deal Finder die Seite selbst laden und
+den Preis lesen kann. Links, die auf die Startseite oder eine Suche umleiten, werden verworfen.
+
+**Shops mit Bot-Schutz:** Digitec, Galaxus und toppreise.ch blockieren automatische Abrufe (403 bzw. eine Prüfseite).
+Für solche Produkt-URLs fragt Deal Finder den KI-Anbieter nach dem Preis genau dieser Seite: Claude öffnet sie mit
+*Web Fetch*, Gemini mit *URL Context*, ergänzt durch die Websuche. Ohne KI erscheint der Hinweis
+„blockiert automatische Abrufe“.
+
 > Hinweis: Jede KI-Suche kostet API-Guthaben. Bei Claude sind Websuchen pro Suchanfrage kostenpflichtig, bei Gemini
 > fällt Grounding je nach Tarif an. Mit dem Suchintervall (Standard: 12 h) und dem Aufwand (Claude: *Tief*) steuerst du die Kosten.
 

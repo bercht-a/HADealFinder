@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from abc import ABC, abstractmethod
@@ -26,7 +27,7 @@ from .const import (
     LOGGER,
 )
 from .extract import parse_price
-from .models import Offer, shop_from_url
+from .models import Offer, shop_from_url, url_in_sources
 
 if TYPE_CHECKING:
     import anthropic
@@ -47,7 +48,9 @@ class CannotConnect(LLMError):
 SYSTEM_PROMPT = (
     "You are a meticulous price research assistant. You search the web for current "
     "retail offers of one specific product and report only offers you actually saw in "
-    "search results or on shop pages. Never invent shops, prices or URLs. "
+    "search results or on shop pages. Never invent shops, prices or URLs: copy every URL "
+    "character by character from a search result or page you actually opened, never build "
+    "or complete one yourself (e.g. guessing a product ID). "
     "Answer with JSON only, no prose."
 )
 
@@ -74,7 +77,9 @@ def build_search_prompt(
     parts.append(
         "Only the exact same product (same model, variant, capacity, colour if specified), "
         "new condition, no used/refurbished items, no accessories, no bundles unless asked. "
-        "Prefer offers that are in stock. Use the direct shop product URL, not a search page."
+        "Prefer offers that are in stock. Use the direct shop product URL, not a search page. "
+        "The URL must appear exactly like this in your search results - if you do not have the exact "
+        "product URL of an offer, leave the offer out."
     )
     if exclude:
         parts.append(f"Exclude offers whose title contains any of: {', '.join(exclude)}.")
@@ -158,23 +163,56 @@ class LLMClient(ABC):
         """Return available model ids (also validates the API key)."""
 
     @abstractmethod
-    async def _async_generate(self, prompt: str, *, web_search: bool, country: str) -> str:
-        """Run a prompt and return the answer text."""
+    async def _async_generate(
+        self, prompt: str, *, web_search: bool, country: str, fetch: bool = False
+    ) -> tuple[str, set[str] | None]:
+        """Run a prompt; return the answer text and the URLs of the web sources used (None = unknown)."""
 
     async def async_search_offers(
         self, query: str, country: str, currency: str, exclude: list[str], rejected: list[str] | None = None
     ) -> list[Offer]:
-        """Search the web for offers."""
-        text = await self._async_generate(
+        """Search the web for offers; mark each offer whether its URL was among the sources."""
+        text, sources = await self._async_generate(
             build_search_prompt(query, country, currency, exclude, rejected), web_search=True, country=country
         )
-        return offers_from_json(parse_json_block(text), currency, self.name)
+        offers = offers_from_json(parse_json_block(text), currency, self.name)
+        if sources:
+            for offer in offers:
+                offer.grounded = url_in_sources(offer.url, sources)
+            LOGGER.debug(
+                "%s: %d offers, %d grounded, %d source URLs",
+                self.name,
+                len(offers),
+                sum(1 for o in offers if o.grounded),
+                len(sources),
+            )
+        return offers
+
+    async def async_price_for_url(self, product: str, url: str, currency: str, country: str) -> Offer | None:
+        """Price of a product page we cannot load ourselves (bot protection): let the AI open / search it."""
+        prompt = (
+            f'Determine the current price of the product "{product}" on this exact page: {url}\n'
+            f"Open the page with your fetch tool. If that is not possible, search the web for this exact page "
+            f"(same shop, same product) and use the price shown in the search results. Price in {currency} incl. VAT. "
+            f"Use the URL {url} for the offer. If you cannot find the price on this shop, return no offers. "
+            + OUTPUT_SPEC
+        )
+        text, _ = await self._async_generate(prompt, web_search=True, country=country, fetch=True)
+        offers = [o for o in offers_from_json(parse_json_block(text), currency, self.name)]
+        if not offers:
+            return None
+        offer = min(offers, key=lambda o: o.price)
+        offer.url = url
+        offer.shop = offer.shop if offer.shop and offer.shop != "?" else shop_from_url(url)
+        offer.source = f"url+{self.name}"
+        offer.grounded = True  # the user supplied this URL
+        return offer
 
     async def async_extract_offer(
         self, product: str, url: str, currency: str, page_text: str, country: str
     ) -> Offer | None:
         """Extract the price from page text."""
-        text = await self._async_generate(
+        text, _ = await self._async_generate(
             build_extract_prompt(product, url, currency, page_text), web_search=False, country=country
         )
         offers = offers_from_json(parse_json_block(text), currency, self.name)
@@ -229,7 +267,28 @@ class GeminiClient(LLMClient):
         ]
         return sorted(models, reverse=True)
 
-    async def _async_generate(self, prompt: str, *, web_search: bool, country: str) -> str:
+    async def _resolve_redirect(self, uri: str) -> str | None:
+        """Grounding chunks point to a Google redirect; return the real target URL."""
+        try:
+            async with self._session.get(
+                uri, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                return resp.headers.get("Location") or (uri if resp.status < 300 else None)
+        except (aiohttp.ClientError, TimeoutError):
+            return None
+
+    async def _sources(self, candidate: dict[str, Any]) -> set[str] | None:
+        chunks = (candidate.get("groundingMetadata") or {}).get("groundingChunks") or []
+        uris = [c["web"]["uri"] for c in chunks if isinstance(c.get("web"), dict) and c["web"].get("uri")][:30]
+        if not uris:
+            return None
+        resolved = await asyncio.gather(*(self._resolve_redirect(u) for u in uris))
+        sources = {u for u in resolved if u and "vertexaisearch" not in u}
+        return sources or None
+
+    async def _async_generate(
+        self, prompt: str, *, web_search: bool, country: str, fetch: bool = False
+    ) -> tuple[str, set[str] | None]:
         payload: dict[str, Any] = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -237,6 +296,8 @@ class GeminiClient(LLMClient):
         }
         if web_search:
             payload["tools"] = [{"google_search": {}}]
+            if fetch:
+                payload["tools"].append({"url_context": {}})
         data = await self._request("POST", f"models/{self.model}:generateContent", payload)
         candidates = data.get("candidates") or []
         if not candidates:
@@ -245,7 +306,7 @@ class GeminiClient(LLMClient):
         text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
         if not text:
             raise LLMError(f"Gemini returned no text (finishReason={candidates[0].get('finishReason')})")
-        return text
+        return text, (await self._sources(candidates[0]) if web_search else None)
 
 
 # Models supporting the dynamic-filtering web search tool version.
@@ -303,7 +364,9 @@ class ClaudeClient(LLMClient):
             raise LLMError(str(err)) from err
         return [m.id for m in page.data]
 
-    async def _async_generate(self, prompt: str, *, web_search: bool, country: str) -> str:
+    async def _async_generate(
+        self, prompt: str, *, web_search: bool, country: str, fetch: bool = False
+    ) -> tuple[str, set[str] | None]:
         import anthropic  # noqa: PLC0415
 
         client = await self._get_client()
@@ -326,9 +389,19 @@ class ClaudeClient(LLMClient):
             if len(country) == 2:
                 tool["user_location"] = {"type": "approximate", "country": country.upper()}
             kwargs["tools"] = [tool]
+            if fetch:
+                new_tools = model.startswith(_CLAUDE_NEW_SEARCH)
+                kwargs["tools"].append(
+                    {
+                        "type": "web_fetch_20260209" if new_tools else "web_fetch_20250910",
+                        "name": "web_fetch",
+                        "max_uses": 3,
+                    }
+                )
 
         messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
         response = None
+        sources: set[str] = set()
         for _ in range(4):  # resume long server-tool turns (pause_turn)
             try:
                 response = await client.messages.create(
@@ -342,6 +415,7 @@ class ClaudeClient(LLMClient):
                 raise CannotConnect(str(err)) from err
             except anthropic.APIStatusError as err:
                 raise LLMError(f"Claude API error {err.status_code}: {err.message}") from err
+            sources |= _claude_source_urls(response.content)
             if response.stop_reason != "pause_turn":
                 break
             messages.append({"role": "assistant", "content": response.content})
@@ -353,7 +427,27 @@ class ClaudeClient(LLMClient):
         if not text:
             raise LLMError(f"Claude returned no text (stop_reason={response.stop_reason})")
         LOGGER.debug("Claude answer: %s", text[:2000])
-        return text
+        return text, (sources or None) if web_search else None
+
+
+def _claude_source_urls(content: list[Any]) -> set[str]:
+    """URLs Claude actually saw: web search results, fetched pages and citations."""
+    urls: set[str] = set()
+    for block in content:
+        btype = getattr(block, "type", None)
+        if btype in ("web_search_tool_result", "web_fetch_tool_result"):
+            inner = getattr(block, "content", None)
+            items = inner if isinstance(inner, list) else [inner]
+            for item in items:
+                url = getattr(item, "url", None)
+                if isinstance(url, str):
+                    urls.add(url)
+        elif btype == "text":
+            for citation in getattr(block, "citations", None) or []:
+                url = getattr(citation, "url", None)
+                if isinstance(url, str):
+                    urls.add(url)
+    return urls
 
 
 def create_llm_client(

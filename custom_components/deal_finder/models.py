@@ -23,6 +23,9 @@ class Offer:
     source: str = "unknown"  # url | gemini | claude | serpapi
     verified: bool = False
     availability: str | None = None
+    # AI offers: True = URL appeared in the search results the AI saw,
+    # False = URL not among them (likely made up), None = unknown
+    grounded: bool | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Serialize."""
@@ -40,6 +43,7 @@ class Offer:
             source=data.get("source", "unknown"),
             verified=bool(data.get("verified", False)),
             availability=data.get("availability"),
+            grounded=data.get("grounded"),
         )
 
 
@@ -71,6 +75,47 @@ def normalize_url(url: str | None) -> str | None:
     host = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.rstrip("/")
     return f"{host}{path}" + (f"?{query}" if query else "")
+
+
+_PRODUCT_ID = re.compile(r"(\d{5,})(?:\.html?)?/?$")
+
+
+def _url_parts(url: str) -> tuple[str, str, str | None] | None:
+    norm = normalize_url(url)
+    if not norm:
+        return None
+    host, _, rest = norm.partition("/")
+    path = "/" + rest.split("?", 1)[0]
+    match = _PRODUCT_ID.search(path)
+    return host, path, match.group(1) if match else None
+
+
+def url_in_sources(url: str | None, sources: set[str] | list[str]) -> bool:
+    """Whether a URL is one of the source URLs (same page or same product id on the same host)."""
+    target = _url_parts(url) if url else None
+    if target is None:
+        return False
+    for src in sources:
+        parts = _url_parts(src)
+        if parts is None or parts[0] != target[0]:
+            continue
+        if parts[1] == target[1] or (target[2] and parts[2] == target[2]):
+            return True
+    return False
+
+
+def is_soft_404(requested: str, final: str) -> bool:
+    """A product link that redirects to the home page, a search or another host is dead."""
+    req, fin = _url_parts(requested), _url_parts(final)
+    if req is None or fin is None:
+        return False
+    if req[0] != fin[0] and not fin[0].endswith("." + req[0]) and not req[0].endswith("." + fin[0]):
+        return True
+    if req[1] == fin[1] or (req[2] and req[2] == fin[2]):
+        return False
+    segments = [s for s in fin[1].split("/") if s]
+    lowered = fin[1].lower()
+    return len(segments) <= 1 or any(k in lowered for k in ("search", "suche", "/s?", "404", "not-found", "notfound"))
 
 
 def _norm(text: str | None) -> str:

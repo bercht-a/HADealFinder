@@ -159,8 +159,12 @@ const STYLE = `
           box-shadow:var(--ha-card-box-shadow, 0 2px 4px rgba(0,0,0,.12)); border:var(--ha-card-border-width,1px) solid var(--divider-color, transparent);
           padding:16px; display:flex; flex-direction:column; gap:10px; position:relative; }
   .card.deal { border:2px solid var(--success-color, #43a047); }
-  .top { display:flex; align-items:flex-start; gap:8px; }
-  .name { font-size:17px; font-weight:500; flex:1; word-break:break-word; }
+  .top { display:flex; align-items:center; gap:8px; margin:-16px -16px 2px; padding:14px 16px;
+         background:rgba(var(--rgb-primary-color, 3,169,244), .14); border-bottom:1px solid var(--divider-color, rgba(0,0,0,.12));
+         border-radius:calc(var(--ha-card-border-radius, 12px) - 1px) calc(var(--ha-card-border-radius, 12px) - 1px) 0 0; }
+  .card.deal .top { background:rgba(var(--rgb-success-color, 67,160,71), .18); }
+  .name { font-size:20px; font-weight:600; line-height:1.25; letter-spacing:.1px; flex:1; word-break:break-word;
+          color:var(--primary-text-color); }
   .chip { font-size:12px; padding:3px 8px; border-radius:12px; white-space:nowrap; }
   .chip.deal { background:var(--success-color, #43a047); color:#fff; }
   .chip.busy { background:var(--info-color, #039be5); color:#fff; }
@@ -456,9 +460,8 @@ class DealFinderPanel extends HTMLElement {
       return;
     }
 
-    const products = [...data.products].sort(
-      (a, b) => Number(b.below_target) - Number(a.below_target) || a.title.localeCompare(b.title, this._lang)
-    );
+    // keep the order in which the products were created
+    const products = data.products;
     const deals = products.filter((p) => p.below_target).length;
     stats.innerHTML = `<b>${products.length}</b> ${esc(t.products)} · <b>${deals}</b> ${esc(t.deals)} · ${esc(
       t.every.replace("{h}", data.scan_interval_hours)

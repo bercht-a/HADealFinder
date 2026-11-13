@@ -183,6 +183,29 @@ def _walk_ld(node: Any, out: list[PriceCandidate], depth: int = 0) -> None:
             _walk_ld(node[key], out, depth + 1)
 
 
+_CHALLENGE_MARKERS = (
+    "access denied",
+    "kurze prüfung",
+    "just a moment",
+    "attention required",
+    "are you a robot",
+    "bist du ein mensch",
+    "captcha",
+    "verify you are human",
+    "zugriff verweigert",
+    "please enable javascript",
+    "pardon our interruption",
+)
+
+
+def looks_like_bot_challenge(page: ParsedPage) -> bool:
+    """Bot protection page instead of the real product page."""
+    if page.prices:
+        return False
+    haystack = f"{page.title} {page.text[:2000]}".lower()
+    return any(marker in haystack for marker in _CHALLENGE_MARKERS)
+
+
 def parse_page(url: str, html: str) -> ParsedPage:
     """Parse HTML and extract price candidates."""
     parser = _PageParser()
@@ -228,6 +251,12 @@ def parse_page(url: str, html: str) -> ParsedPage:
 
 async def fetch_page(session: aiohttp.ClientSession, url: str, country: str) -> str:
     """Download a page and return its HTML."""
+    html, _ = await fetch_page_with_url(session, url, country)
+    return html
+
+
+async def fetch_page_with_url(session: aiohttp.ClientSession, url: str, country: str) -> tuple[str, str]:
+    """Download a page; return (HTML, final URL after redirects)."""
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -243,6 +272,6 @@ async def fetch_page(session: aiohttp.ClientSession, url: str, country: str) -> 
             if resp.status >= 400:
                 raise PageFetchError(url, resp.status, f"HTTP {resp.status} for {url}")
             raw = await resp.content.read(MAX_HTML_BYTES)
-            return raw.decode(resp.charset or "utf-8", errors="replace")
+            return raw.decode(resp.charset or "utf-8", errors="replace"), str(resp.url)
     except (aiohttp.ClientError, TimeoutError) as err:
         raise PageFetchError(url, None, f"{type(err).__name__} for {url}") from err

@@ -25,9 +25,16 @@ from .const import (
     CONF_WEB_SEARCH,
     LOGGER,
 )
-from .extract import PageFetchError, fetch_page, parse_page, parse_price
+from .extract import (
+    PageFetchError,
+    fetch_page,
+    fetch_page_with_url,
+    looks_like_bot_challenge,
+    parse_page,
+    parse_price,
+)
 from .llm import LLMClient, llm_from_config
-from .models import Offer, is_blocked, normalize_url, shop_from_url
+from .models import Offer, is_blocked, is_soft_404, normalize_url, shop_from_url
 
 MAX_VERIFY = 5
 
@@ -134,7 +141,15 @@ class PriceFinder:
 
     async def _from_url(self, url: str, product_name: str) -> list[Offer]:
         """Track an explicit product / comparison page URL."""
-        html = await fetch_page(self.session, url, self.country)
+        shop = shop_from_url(url)
+        try:
+            html = await fetch_page(self.session, url, self.country)
+        except PageFetchError as err:
+            if err.status in (404, 410):
+                raise SearchError(f"{shop}: Seite nicht gefunden ({err.status})") from err
+            # 403 / timeouts: usually bot protection -> ask the AI instead
+            return await self._from_url_via_llm(url, product_name, f"{shop}: blockiert automatische Abrufe", err)
+
         page = parse_page(url, html)
         matching = [p for p in page.prices if not p.currency or p.currency.upper() == self.currency]
         if matching:
@@ -143,7 +158,7 @@ class PriceFinder:
                 Offer(
                     price=cand.price,
                     currency=(cand.currency or self.currency).upper(),
-                    shop=cand.seller or shop_from_url(url),
+                    shop=cand.seller or shop,
                     url=url,
                     title=page.title or product_name,
                     source="url",
@@ -151,48 +166,80 @@ class PriceFinder:
                     availability=cand.availability,
                 )
             ]
+        if looks_like_bot_challenge(page):
+            return await self._from_url_via_llm(url, product_name, f"{shop}: blockiert automatische Abrufe", None)
         if self.llm and page.text:
             offer = await self.llm.async_extract_offer(product_name, url, self.currency, page.text, self.country)
             if offer:
                 offer.title = offer.title or page.title
                 return [offer]
-        raise SearchError(f"no price found on {shop_from_url(url)}")
+        return await self._from_url_via_llm(url, product_name, f"{shop}: kein Preis auf der Seite gefunden", None)
+
+    async def _from_url_via_llm(
+        self, url: str, product_name: str, reason: str, cause: Exception | None
+    ) -> list[Offer]:
+        if self.llm is None:
+            raise SearchError(f"{reason} (mit KI-Anbieter möglich)") from cause
+        LOGGER.debug("%s -> asking %s for %s", reason, self.llm.name, url)
+        offer = await self.llm.async_price_for_url(product_name, url, self.currency, self.country)
+        if offer is None:
+            raise SearchError(f"{reason}, auch die KI fand keinen Preis") from cause
+        offer.title = offer.title or product_name
+        return [offer]
 
     async def _from_llm(self, query: str, exclude: list[str], rejected: list[str]) -> list[Offer]:
         assert self.llm is not None
         offers = await self.llm.async_search_offers(query, self.country, self.currency, exclude, rejected)
         LOGGER.debug("LLM offers for %s: %s", query, offers)
-        if self.verify and offers:
+        if offers:
             offers = await self._verify(offers)
         return offers
 
     async def _verify(self, offers: list[Offer]) -> list[Offer]:
-        """Check the cheapest LLM offers against the real shop page."""
-        offers = sorted(offers, key=lambda o: o.price)
-        to_check = [o for o in offers if o.url][:MAX_VERIFY]
+        """Check AI offers against the real shop pages.
 
-        async def check(offer: Offer) -> Offer | None:
+        - URL not among the AI's search sources (grounded=False) or no URL at all:
+          kept only if the page can be loaded and a price is found there.
+        - Grounded / unknown offers: the cheapest ones are price-checked if
+          "verify prices" is on; dead links (404, redirect to search/home) are dropped.
+        """
+        offers = sorted(offers, key=lambda o: o.price)
+        must_check = [o for o in offers if o.grounded is False or not o.url]
+        optional = [o for o in offers if o not in must_check and o.url][:MAX_VERIFY] if self.verify else []
+
+        async def check(offer: Offer, required: bool) -> Offer | None:
+            if not offer.url:
+                LOGGER.debug("Dropping AI offer without URL: %s", offer)
+                return None
             try:
-                html = await fetch_page(self.session, offer.url, self.country)  # type: ignore[arg-type]
+                html, final_url = await fetch_page_with_url(self.session, offer.url, self.country)
             except PageFetchError as err:
-                if err.status in (404, 410):
-                    LOGGER.debug("Dropping offer with dead URL %s", offer.url)
-                    return None  # hallucinated or removed product page
-                return offer  # blocked by bot protection etc. -> keep unverified
-            page = parse_page(offer.url or "", html)
+                if required or err.status in (404, 410):
+                    LOGGER.debug("Dropping offer, link not usable (%s): %s", err, offer.url)
+                    return None
+                return offer  # blocked by bot protection -> keep, but unverified
+            if is_soft_404(offer.url, final_url):
+                LOGGER.debug("Dropping offer, %s redirects to %s", offer.url, final_url)
+                return None
+            page = parse_page(final_url, html)
             prices = [p for p in page.prices if not p.currency or p.currency.upper() == self.currency]
-            if prices:
-                real = min(prices, key=lambda p: p.price)
-                if abs(real.price - offer.price) > 0.01:
-                    LOGGER.debug("Corrected %s price %s -> %s", offer.shop, offer.price, real.price)
-                offer.price = real.price
-                offer.verified = True
-                if real.availability:
-                    offer.availability = real.availability
+            if not prices:
+                if required:
+                    LOGGER.debug("Dropping ungrounded offer, no price on page: %s", offer.url)
+                    return None
+                return offer
+            real = min(prices, key=lambda p: p.price)
+            if abs(real.price - offer.price) > 0.01:
+                LOGGER.debug("Corrected %s price %s -> %s", offer.shop, offer.price, real.price)
+            offer.price = real.price
+            offer.verified = True
+            if real.availability:
+                offer.availability = real.availability
             return offer
 
-        checked = await asyncio.gather(*(check(o) for o in to_check))
-        dropped = {id(o) for o, res in zip(to_check, checked, strict=True) if res is None}
+        targets = [(o, True) for o in must_check] + [(o, False) for o in optional]
+        results = await asyncio.gather(*(check(o, req) for o, req in targets))
+        dropped = {id(o) for (o, _), res in zip(targets, results, strict=True) if res is None}
         return [o for o in offers if id(o) not in dropped]
 
     async def _from_serpapi(self, query: str) -> list[Offer]:

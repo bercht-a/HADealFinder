@@ -138,3 +138,29 @@ async def test_ws_search(hass: HomeAssistant, hass_ws_client) -> None:
         await client.send_json_auto_id({"type": "deal_finder/search", "product_id": "nope"})
         res = await client.receive_json()
         assert res["error"]["code"] == "not_found"
+
+
+async def test_ws_order_is_creation_order(hass: HomeAssistant, hass_ws_client) -> None:
+    """Products keep the order they were created in, also after editing."""
+    from custom_components.deal_finder.websocket import build_payload
+
+    with patch(FIND, AsyncMock(return_value=[])):
+        await _setup(hass)
+        client = await hass_ws_client(hass)
+        for name in ("Zebra", "Apfel", "Mango"):
+            await client.send_json_auto_id(
+                {"type": "deal_finder/product/save", "data": {"name": name, "urls": "https://x.example/" + name}}
+            )
+            assert (await client.receive_json())["result"]["success"]
+            await hass.async_block_till_done(wait_background_tasks=True)
+        await client.send_json_auto_id(
+            {
+                "type": "deal_finder/product/save",
+                "product_id": "prod1",
+                "data": {"name": "Kopfhörer bearbeitet", "urls": "https://shop.example/p"},
+            }
+        )
+        assert (await client.receive_json())["result"]["success"]
+        await hass.async_block_till_done(wait_background_tasks=True)
+    titles = [p["title"] for p in build_payload(hass)["products"]]
+    assert titles == ["Kopfhörer bearbeitet", "Zebra", "Apfel", "Mango"]
